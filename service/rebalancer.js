@@ -9,6 +9,8 @@
 const logger = require('../api/logger');
 const stringify = obj => JSON.stringify(obj, null, 2);
 const testModeOn = global.testModeOn;
+
+
 if (testModeOn) logger.log('test mode on');
 
 // make sure only one instance is running
@@ -44,13 +46,15 @@ const {listPeersMapSync} = importLazy('../lnd-api/utils');
 const {sendMessage} = importLazy('../api/telegram');
 
 logger.log('rebalancer is starting up');
+// new parameter for auto rebalance to apply a discount in maxppm
+const ppmDiscountFactor = config.rebalancer.ppmDiscountFactor || 1.0;
 
 const maxCount = config.rebalancer.maxInstances || constants.rebalancer.maxInstances;
 const defaultMaxPpm = config.rebalancer.maxAutoPpm || constants.rebalancer.maxAutoPpm;
 const maxPendingHtlcs = config.rebalancer.maxPendingHtlcs || constants.rebalancer.maxPendingHtlcs;
 const historyDepth = 2 * 60 * 60; // secs
 const minToRebalance = 50000; // min liquidity to rebalance
-const minLocal = 1000000; // min local liquidity for balanced peers
+const minLocal = 1500000; // min local liquidity for balanced peers
 const tickDuration = 60;  // rebalancing tick duration in sec
 
 const backoff = x => 2 * Math.pow(2, x);
@@ -464,60 +468,67 @@ function runLoopImpl() {
 
   // pref - prefix for log messages
   // returns maxPpm if ok to proceed, undefined otherwise
-  function checkPeers(from, to, pref) {
-    if (isInFlight(from.peer, to.peer)) {
-      // one rebalance at a time per pair
-      return logger.debug(pref + 'already in flight');
-    }
+function checkPeers(from, to, pref) {
+  if (isInFlight(from.peer, to.peer)) {
+    // one rebalance at a time per pair
+    return logger.debug(pref + 'already in flight');
+  }
 
-    // exp backoff based on rebalance history
-    const key = from.peer + ':' + to.peer;
-    if (history[key] && history[key].count > 0) {
-      const tplus = backoff(history[key].count);  // mins
-      logger.debug(pref + 'EXP backoff:', history[key], 'backoff:', tplus, 'mins');
-      const left = history[key].last + tplus * 60 * 1000 - Date.now();
-      if (left > 0) {
-        return logger.debug(pref + 'wait for backoff, remaining', (left/(60 * 1000)).toFixed(1), 'mins');
-      }
+  // exp backoff based on rebalance history
+  const key = from.peer + ':' + to.peer;
+  if (history[key] && history[key].count > 0) {
+    const tplus = backoff(history[key].count);  // mins
+    logger.debug(pref + 'EXP backoff:', history[key], 'backoff:', tplus, 'mins');
+    const left = history[key].last + tplus * 60 * 1000 - Date.now();
+    if (left > 0) {
+      return logger.debug(pref + 'wait for backoff, remaining', (left / (60 * 1000)).toFixed(1), 'mins');
     }
+  }
 
-    // check for pending htlcs
-    let fromHtlcs = 0;
-    let toHtlcs = 0;
-    pendingHtlcs.forEach(h => {
-      if (h.peer === from.peer) fromHtlcs = h.htlcs.length;
-      if (h.peer === to.peer) toHtlcs = h.htlcs.length;
-    })
-    logger.debug(`${pref}pending htlcs for ${from.name}:`, fromHtlcs);
-    logger.debug(`${pref}pending htlcs for ${to.name}:`, toHtlcs);
-    if (Math.max(fromHtlcs, toHtlcs) >= maxPendingHtlcs) {
-      return logger.debug(pref + 'too many pending htlcs, skip rebalance');
-    }
+  // check for pending htlcs
+  let fromHtlcs = 0;
+  let toHtlcs = 0;
+  pendingHtlcs.forEach(h => {
+    if (h.peer === from.peer) fromHtlcs = h.htlcs.length;
+    if (h.peer === to.peer) toHtlcs = h.htlcs.length;
+  });
+  logger.debug(`${pref}pending htlcs for ${from.name}:`, fromHtlcs);
+  logger.debug(`${pref}pending htlcs for ${to.name}:`, toHtlcs);
+  if (Math.max(fromHtlcs, toHtlcs) >= maxPendingHtlcs) {
+    return logger.debug(pref + 'too many pending htlcs, skip rebalance');
+  }
 
-    // determine max ppm
-    let maxPpm = defaultMaxPpm;
-    let fee = feeMap[to.peer];
-    let analysis = analyzeFees(to.name, to.peer, fee.local, fee.remote);
-    if (analysis) {
-      const action = constants.feeAnalysis.action;
-      let status = analysis[0];
-      if (status.action === action.pause) {
-        let msg = pref + 'rebalancing is paused';
-        if (status.range) msg += ', suggested local ppm range: ' + status.range;
-        if (status.summary) msg += ', ' + status.summary;
-        return logger.debug(msg);  // skip
-      } else if (status.maxPpm) {
-        let msg = pref + 'setting max ppm to: ' + status.maxPpm;
-        if (status.range) msg += ', suggested local ppm range: ' + status.range;
-        if (status.summary) msg += ', ' + status.summary;
-        logger.debug(msg);
-        maxPpm = status.maxPpm;
-      } else {
-        logger.error(pref + 'fee analysis did not return max ppm, assuming default');
-      }
+  // determine max ppm
+  let maxPpm = defaultMaxPpm;
+  let fee = feeMap[to.peer];
+  let analysis = analyzeFees(to.name, to.peer, fee.local, fee.remote);
+
+  if (analysis) {
+    const action = constants.feeAnalysis.action;
+    let status = analysis[0];
+
+    if (status.action === action.pause) {
+      let msg = pref + 'rebalancing is paused';
+      if (status.range) msg += ', suggested local ppm range: ' + status.range;
+      if (status.summary) msg += ', ' + status.summary;
+      return logger.debug(msg);  // skip
+    } else if (status.maxPpm) {
+      let msg = pref + 'setting max ppm to: ' + status.maxPpm;
+      if (status.range) msg += ', suggested local ppm range: ' + status.range;
+      if (status.summary) msg += ', ' + status.summary;
+      logger.debug(msg);
+
+      // apply maxppm discount factor
+      maxPpm = Math.round(status.maxPpm * ppmDiscountFactor);
+      logger.debug(pref + 'discounted ppm applied: ' + maxPpm);
+    } else {
+      logger.error(pref + 'fee analysis did not return max ppm, assuming default');
     }
-    return maxPpm;
-  } // checkPeers
+  }
+
+  return maxPpm;
+}
+
 } // runLoopImpl
 
 // process rebalancing queue
