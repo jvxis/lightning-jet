@@ -862,6 +862,7 @@ module.exports = {
     let db = getHandle();
     let list = [];
     let res;
+    let error;
     db.serialize(function() {
       let q = 'SELECT rowid AS id, * FROM ' + REBALANCE_HISTORY_TABLE;
       let first;
@@ -878,6 +879,10 @@ module.exports = {
         q += ' (from_node = "' + node + '" OR to_node = "' + node + '")';
       }
       db.each(q, function(err, row) {
+        if (err) {
+          error = err;
+          return;
+        }
         list.push({
           row: row.id,
           date: row.date,
@@ -893,6 +898,7 @@ module.exports = {
           extra: row.extra
         })
       }, function(err) {
+        if (err) error = err;
         res = list;
       })
     })
@@ -900,6 +906,7 @@ module.exports = {
       require('deasync').runLoopOnce();
     }
     closeHandle(db);
+    if (error) throw error;
     return res;
   },
   enableTestMode() {
@@ -1011,10 +1018,12 @@ function createFailedHtlcTable(db) {
 }
 
 function createRebalanceHistoryTable(db) {
-  executeDbSync(db, "CREATE TABLE IF NOT EXISTS " + REBALANCE_HISTORY_TABLE + " (date INTEGER NOT NULL, from_node TEXT NOT NULL, to_node TEXT NOT NULL, amount INTEGER NOT NULL, rebalanced INTEGER DEFAULT 0, ppm INTEGER, min INTEGER, status INTEGER, extra TEXT DEFAULT NULL)");
+  executeDbSync(db, "CREATE TABLE IF NOT EXISTS " + REBALANCE_HISTORY_TABLE + " (date INTEGER NOT NULL, from_node TEXT NOT NULL, to_node TEXT NOT NULL, amount INTEGER NOT NULL, rebalanced INTEGER DEFAULT 0, ppm INTEGER, min INTEGER, status INTEGER DEFAULT 1, extra TEXT DEFAULT NULL)");
   // add a column, it'll error out if the column already exists
   executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN ppm INTEGER");
   executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN min INTEGER");
+  executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN status INTEGER DEFAULT 1");
+  executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN extra TEXT DEFAULT NULL");
   executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN start_date INTEGER");
   executeDbSync(db, "ALTER TABLE " + REBALANCE_HISTORY_TABLE + " ADD COLUMN type TEXT");
 }
