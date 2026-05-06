@@ -28,6 +28,9 @@ const TXN_TABLE = 'txn';
 const LIQUIDITY_TABLE = 'liquidity';  // lists peers that were ready to commit liquidity for payments
 
 const allTables = [ REBALANCE_HISTORY_TABLE, FAILED_HTLC_TABLE, REBALANCE_AVOID_TABLE, NAMEVAL_TABLE, NAMEVAL_LIST_TABLE, TELEGRAM_MESSAGES_TABLE, FEE_HISTORY_TABLE, ACTIVE_REBALANCE_TABLE, CHANNEL_EVENTS_TABLE, TXN_TABLE, LIQUIDITY_TABLE ];
+const SQLITE_BUSY_TIMEOUT_MS = 10 * 1000;
+const SQLITE_BUSY_RETRIES = 3;
+const SQLITE_BUSY_RETRY_MS = 1000;
 
 var testMode = false;
 
@@ -859,55 +862,69 @@ module.exports = {
     }
   },
   listRebalancesSync(secs = -1, status, node) {
-    let db = getHandle();
-    let list = [];
-    let res;
-    let error;
-    db.serialize(function() {
-      let q = 'SELECT rowid AS id, * FROM ' + REBALANCE_HISTORY_TABLE;
-      let first;
-      if (secs > 0) {
-        if (first) q += ' AND'; else { q += ' WHERE'; first = true; };
-        q += ' date > ' + (Date.now() - secs * 1000);
+    for (let attempt = 1; attempt <= SQLITE_BUSY_RETRIES; attempt++) {
+      try {
+        return listRebalancesOnceSync();
+      } catch(error) {
+        if (error.code !== 'SQLITE_BUSY' || attempt === SQLITE_BUSY_RETRIES) throw error;
+        deasync.sleep(SQLITE_BUSY_RETRY_MS);
       }
-      if (status !== undefined) {
-        if (first) q += ' AND'; else { q += ' WHERE'; first = true; }
-        q += ' status = ' + status;
-      }
-      if (node) {
-        if (first) q += ' AND'; else { q += ' WHERE'; first = true; }
-        q += ' (from_node = "' + node + '" OR to_node = "' + node + '")';
-      }
-      db.each(q, function(err, row) {
-        if (err) {
-          error = err;
-          return;
-        }
-        list.push({
-          row: row.id,
-          date: row.date,
-          start: row.start_date,
-          from: row.from_node,
-          to: row.to_node,
-          amount: row.amount,
-          rebalanced: row.rebalanced,
-          ppm: row.ppm,
-          min: row.min,
-          status: row.status,
-          type: row.type,
-          extra: row.extra
-        })
-      }, function(err) {
-        if (err) error = err;
-        res = list;
-      })
-    })
-    while(res === undefined) {
-      require('deasync').runLoopOnce();
     }
-    closeHandle(db);
-    if (error) throw error;
-    return res;
+
+    function listRebalancesOnceSync() {
+      let db = getHandle();
+      let list = [];
+      let res;
+      let error;
+      try {
+        db.serialize(function() {
+          let q = 'SELECT rowid AS id, * FROM ' + REBALANCE_HISTORY_TABLE;
+          let first;
+          if (secs > 0) {
+            if (first) q += ' AND'; else { q += ' WHERE'; first = true; };
+            q += ' date > ' + (Date.now() - secs * 1000);
+          }
+          if (status !== undefined) {
+            if (first) q += ' AND'; else { q += ' WHERE'; first = true; }
+            q += ' status = ' + status;
+          }
+          if (node) {
+            if (first) q += ' AND'; else { q += ' WHERE'; first = true; }
+            q += ' (from_node = "' + node + '" OR to_node = "' + node + '")';
+          }
+          db.each(q, function(err, row) {
+            if (err) {
+              error = err;
+              return;
+            }
+            list.push({
+              row: row.id,
+              date: row.date,
+              start: row.start_date,
+              from: row.from_node,
+              to: row.to_node,
+              amount: row.amount,
+              rebalanced: row.rebalanced,
+              ppm: row.ppm,
+              min: row.min,
+              status: row.status,
+              type: row.type,
+              extra: row.extra
+            })
+          }, function(err) {
+            if (err) error = err;
+            res = list;
+          })
+        })
+        while(res === undefined) {
+          require('deasync').runLoopOnce();
+        }
+        if (error) throw error;
+        return res;
+      } finally {
+        closeHandle(db);
+      }
+    }
   },
   enableTestMode() {
     console.log('test mode enabled');
@@ -917,8 +934,9 @@ module.exports = {
 }
 
 function getHandle() {
-  if (testMode) return new sqlite3.Database(testDbFile); 
-  else return new sqlite3.Database(dbFile);
+  const handle = (testMode) ? new sqlite3.Database(testDbFile) : new sqlite3.Database(dbFile);
+  handle.configure('busyTimeout', SQLITE_BUSY_TIMEOUT_MS);
+  return handle;
 }
 
 function closeHandle(handle) {
