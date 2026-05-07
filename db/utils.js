@@ -365,23 +365,44 @@ module.exports = {
     }
   },
   listActiveRebalancesSync() {
-    let db = getHandle();
-    let done;
-    let list = [];
-    db.serialize(function() {
-      let q = 'SELECT rowid, * FROM ' + ACTIVE_REBALANCE_TABLE;
-      if (testMode) console.log(q);
-      db.each(q, function(err, row) {
-        list.push(row);
-      }, function(err) {
-        done = true;
-      })
-    })
-    while(!done) {
-      require('deasync').runLoopOnce();
+    for (let attempt = 1; attempt <= SQLITE_BUSY_RETRIES; attempt++) {
+      try {
+        return listActiveRebalancesOnceSync();
+      } catch(error) {
+        if (error.code !== 'SQLITE_BUSY' || attempt === SQLITE_BUSY_RETRIES) throw error;
+        deasync.sleep(SQLITE_BUSY_RETRY_MS);
+      }
     }
-    closeHandle(db);
-    return list;
+
+    function listActiveRebalancesOnceSync() {
+      let db = getHandle();
+      let done;
+      let error;
+      let list = [];
+      try {
+        db.serialize(function() {
+          let q = 'SELECT rowid, * FROM ' + ACTIVE_REBALANCE_TABLE;
+          if (testMode) console.log(q);
+          db.each(q, function(err, row) {
+            if (err) {
+              error = err;
+              return;
+            }
+            list.push(row);
+          }, function(err) {
+            if (err) error = err;
+            done = true;
+          })
+        })
+        while(!done) {
+          require('deasync').runLoopOnce();
+        }
+        if (error) throw error;
+        return list;
+      } finally {
+        closeHandle(db);
+      }
+    }
   },
   // pid is optional, used for testing
   recordActiveRebalanceSync({from, to, amount, ppm, mins}, pid) {
