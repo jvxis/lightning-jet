@@ -170,8 +170,7 @@ cap
 
       if (check.error) console.log('channel.db:', check.error);
       else {
-        const str = (check.size >= 1000) ? withCommas(check.size) + ' gb' : check.size + ' mb'
-        console.log('channel.db:', str);
+        console.log('channel.db:', check.str);
       }
 
       if (stats) {

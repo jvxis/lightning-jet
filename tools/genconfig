@@ -13,6 +13,9 @@ const data =
   "macaroonPath": "/home/umbrel/umbrel/lnd/data/chain/bitcoin/mainnet/admin.macaroon",\n\
   "tlsCertPath": "/home/umbrel/umbrel/lnd/tls.cert",\n\
   "debugMode": false,\n\
+  "channeldb": {\n\
+    "sizeProfile": "small"\n\
+  },\n\
   "rebalancer": {\n\
     "maxTime": 30,\n\
     "maxPpm": 650,\n\

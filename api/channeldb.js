@@ -48,27 +48,53 @@ module.exports = {
     try {
       const stats = statSync(global.channelDbFile);
       const size = global.testChannelDbSize || Math.round(stats.size / Math.pow(10, 6));  // in mbs
-      const str = (size >= 1000) ? withCommas(size) + ' gb' : size + ' mb';
+      const str = formatSize(size);
+      const threshold = getSizeThreshold();
 
       let msg;
-      if (size > priority.urgent * 1000) {
-        msg  = 'channel.db size ' + str + ' exceeds ' + priority.urgent + ' gb';
+      if (size > threshold.urgent * 1000) {
+        msg  = 'channel.db size ' + str + ' exceeds ' + threshold.urgent + ' gb';
         msg += '\nyou must prune & compact ASAP: https://plebnet.wiki/wiki/Compacting_Channel_DB';
-        return { msg: msg, priority: priority.urgent, size: size }
-      } else if (size > priority.serious * 1000) {
-        msg  = 'channel.db size ' + str + ' exceeds ' + priority.serious + ' gb';
+        return { msg: msg, priority: priority.urgent, size: size, str: str }
+      } else if (size > threshold.serious * 1000) {
+        msg  = 'channel.db size ' + str + ' exceeds ' + threshold.serious + ' gb';
         msg += '\nconsider pruning & compacting: https://plebnet.wiki/wiki/Compacting_Channel_DB';
-        return { msg: msg, priority: priority.serious, size: size }
-      } else if (size > priority.warning * 1000) {
-        msg  = 'channel.db size ' + str + ' exceeds ' + priority.warning + ' gb';
+        return { msg: msg, priority: priority.serious, size: size, str: str }
+      } else if (size > threshold.warning * 1000) {
+        msg  = 'channel.db size ' + str + ' exceeds ' + threshold.warning + ' gb';
         msg += '\nfamiliarize yourself with compacting & pruning procedure: https://plebnet.wiki/wiki/Compacting_Channel_DB';
-        return { msg: msg, priority: priority.warning, size: size }
+        return { msg: msg, priority: priority.warning, size: size, str: str }
       } else {
         msg  = 'channel.db size ' + str + ' is within normal limits';
-        return { msg: msg, priority: priority.normal, size: size }
+        return { msg: msg, priority: priority.normal, size: size, str: str }
       }
     } catch(error) {
       logger.error(error.toString());
     }
   }
+}
+
+function getSizeThreshold() {
+  const profiles = constants.channeldb.sizeProfiles;
+  const profile = getSizeProfile();
+  const thresholds = profiles[profile] || profiles.small;
+  const custom = config.channeldb && config.channeldb.sizeThreshold;
+  return Object.assign({}, thresholds, custom);
+}
+
+function getSizeProfile() {
+  const profile = (config.channeldb && (config.channeldb.sizeProfile || config.channeldb.size)) ||
+    config.boltDbSize ||
+    config.boltdbSize ||
+    config.boltdbsize ||
+    'small';
+
+  return profile.toString().toLowerCase();
+}
+
+function formatSize(size) {
+  if (size < 1000) return size + ' mb';
+
+  const gb = size / 1000;
+  return withCommas(gb.toFixed(1)) + ' gb';
 }

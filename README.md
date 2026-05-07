@@ -294,6 +294,12 @@ A list of config settings under `./api/config.json`:
 |`telegramToken`|The telegram bot token.|
 |`avoid`|A list of nodes to avoid during manual and automated rebalances. `jet rebalance` avoids expensive nodes automatically. the `avoid` setting can help speed things up by providing a static list of nodes to avoid.|
 
+Settings under `channeldb` section:
+|||
+|--|--|
+|`sizeProfile`|channel.db alert thresholds. Supported profiles: `small` (>4 gb warning, >8 gb serious, >16 gb urgent), `medium` (>12 gb warning, >16 gb serious, >23 gb urgent), `large` (>23 gb warning, >26 gb serious, >30 gb urgent). Defaults to `small`.|
+|`sizeThreshold`|Optional custom channel.db thresholds in gb, e.g. `"sizeThreshold": {"warning": 23, "serious": 26, "urgent": 30}`.|
+
 Settings under `rebalancer` section:
 |||
 |--|--|
@@ -321,6 +327,9 @@ Settings under `rebalancer` section:
   "tlsCertPath": "/home/umbrel/umbrel/lnd/tls.cert",
   "debugMode": false,
   "telegramToken": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+  "channeldb": {
+    "sizeProfile": "small"
+  },
   "rebalancer": {
     "maxTime": 30,
     "maxPpm": 650,

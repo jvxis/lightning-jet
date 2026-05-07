@@ -84,6 +84,23 @@ exports.channeldb = {
     serious: 8,
     urgent: 16
   },
+  sizeProfiles: {  // in gb
+    small: {
+      warning: 4,
+      serious: 8,
+      urgent: 16
+    },
+    medium: {
+      warning: 12,
+      serious: 16,
+      urgent: 23
+    },
+    large: {
+      warning: 23,
+      serious: 26,
+      urgent: 30
+    }
+  },
   telegramNotify: {
     category: 'telegram.notify.channeldb',
     warning: 24 * 60 * 60,  // 24 hours
